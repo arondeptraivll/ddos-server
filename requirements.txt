@@ -1,5 +1,7 @@
+# Nội dung file: requirements.txt
 Flask
-requests
-gunicorn
-flask-socketio
+Flask-SocketIO
 eventlet
+gunicorn
+Pillow
+mss

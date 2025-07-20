@@ -1,4 +1,4 @@
-<!-- START OF FILE: templates/admin.html -->
+<!-- START OF FILE: templates/admin.html (FIXED) -->
 <!DOCTYPE html>
 <html>
 <head>
@@ -148,7 +148,15 @@
         socket.on('disconnect', () => console.log("Socket disconnected."));
         socket.on('connect_error', (err) => { console.error("Connection Error:", err.message); });
         socket.on('update_client_list', updateClientList);
-        socket.on('new_frame', d => { if (d.client_id === currentViewingClientId && !isClientLocked) ui.screenImage.src = 'data:image/jpeg;base64,' + d.image; });
+
+        // SỬA ĐỔI Ở ĐÂY: Gỡ bỏ điều kiện `!isClientLocked`
+        socket.on('new_frame', d => {
+            // Chỉ cần kiểm tra xem chúng ta có đang xem client này không
+            if (d.client_id === currentViewingClientId) {
+                ui.screenImage.src = 'data:image/jpeg;base64,' + d.image;
+            }
+        });
+        
         socket.on('command_result', d => { if (d.client_id === currentViewingClientId) { const outputNode = document.createTextNode('\n' + d.output); ui.commandOutput.appendChild(outputNode); ui.commandOutput.parentElement.scrollTop = ui.commandOutput.parentElement.scrollHeight; }});
         
         ui.commandBtn.addEventListener('click', sendCommand); ui.commandInput.addEventListener('keyup', e => e.key === 'Enter' && sendCommand()); ui.toggleTerminalBtn.addEventListener('click', toggleTerminal);
@@ -156,4 +164,4 @@
     </script>
 </body>
 </html>
-<!-- END OF FILE: templates/admin.html -->
+<!-- END OF FILE: templates/admin.html (FIXED) -->

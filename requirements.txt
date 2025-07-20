@@ -1,7 +1,6 @@
-# Nội dung file: requirements.txt
+# --- START OF FILE: requirements.txt ---
 Flask
 Flask-SocketIO
 eventlet
 gunicorn
-Pillow
-mss
+# --- END OF FILE: requirements.txt ---

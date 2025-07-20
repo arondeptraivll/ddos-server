@@ -13,19 +13,16 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
-# SECRET_KEY rất QUAN TRỌNG cho việc quản lý session đăng nhập
 app.config['SECRET_KEY'] = os.urandom(24) 
 socketio = SocketIO(app, async_mode='eventlet')
 
 # === Biến toàn cục ===
-connected_clients = {}  # { client_id: {'sid': sid, ...} }
-sid_to_client_id = {}   # { sid: client_id } - Dictionary tra cứu ngược để tăng tốc độ
+connected_clients = {}
+sid_to_client_id = {}
 ADMIN_ROOM = 'admin_subscribers'
-# Lấy mật khẩu từ biến môi trường của Render. Nếu không có, dùng mật khẩu mặc định 'admin'
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin')
 
 # === HTTP Routes ===
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
@@ -45,25 +42,37 @@ def logout():
 
 @app.route('/')
 def admin_panel():
-    """Trang Dashboard chính, yêu cầu đăng nhập."""
     if not session.get('logged_in'):
         return redirect(url_for('login'))
     return render_template('admin.html')
 
 # === Socket.IO Events ===
 def update_admins_client_list():
-    """Hàm phụ trợ, gửi danh sách client cập nhật tới tất cả admin."""
     client_ids = list(connected_clients.keys())
     socketio.emit('update_client_list', client_ids, to=ADMIN_ROOM)
 
 @socketio.on('connect')
 def handle_connect():
-    # Chỉ cho phép admin đã đăng nhập kết nối Socket.IO từ trình duyệt
-    # Client thật (bot) không dùng session nên sẽ không bị ảnh hưởng
-    is_client = request.sid in sid_to_client_id
-    if not session.get('logged_in') and not is_client:
-        return False # Từ chối kết nối socket từ trình duyệt chưa đăng nhập
-    pass
+    """
+    Hàm này quyết định ai được phép kết nối socket.
+    Sử dụng "secret handshake" qua header để xác thực client.
+    """
+    client_type = request.headers.get('X-Client-Type')
+
+    # Trường hợp 1: Admin đã đăng nhập (kết nối từ trình duyệt)
+    if session.get('logged_in'):
+        print(f"[SERVER] Admin connected to socket from {request.remote_addr}")
+        return True
+
+    # Trường hợp 2: Là client thật (bot) với header đúng
+    if client_type == 'gemlogin-bot':
+        print(f"[SERVER] Client handshake successful from {request.remote_addr}")
+        return True
+
+    # Trường hợp 3: Kết nối không xác định (trình duyệt lạ, bot giả mạo)
+    print(f"[SERVER] Rejected unauthorized connection from {request.remote_addr}")
+    return False # Từ chối
+
 
 @socketio.on('disconnect')
 def handle_disconnect():
@@ -84,9 +93,8 @@ def handle_client_registration(data):
         # Xóa client cũ nếu có cùng ID (trường hợp client kết nối lại)
         for old_sid, old_cid in list(sid_to_client_id.items()):
             if old_cid == client_id:
-                del sid_to_client_id[old_sid]
-                if client_id in connected_clients:
-                     del connected_clients[client_id]
+                if old_sid in sid_to_client_id: del sid_to_client_id[old_sid]
+                if client_id in connected_clients: del connected_clients[client_id]
                 break
 
         connected_clients[client_id] = {'sid': sid}
@@ -118,8 +126,7 @@ def handle_command_result(data):
 
 @socketio.on('subscribe_to_admin_updates')
 def handle_admin_subscription():
-    if not session.get('logged_in'):
-        return # Không cho phép subscribe nếu chưa đăng nhập
+    if not session.get('logged_in'): return
     join_room(ADMIN_ROOM)
     emit('update_client_list', list(connected_clients.keys()))
 
@@ -127,7 +134,7 @@ def handle_admin_subscription():
 def handle_toggle_lock(data):
     if not session.get('logged_in'): return
     client_id = data.get('client_id')
-    lock_state = data.get('lock_state') # True để bật, False để tắt
+    lock_state = data.get('lock_state')
     if client_id in connected_clients:
         target_sid = connected_clients[client_id]['sid']
         print(f"[SERVER] Setting lock state for {client_id} to {lock_state}")
